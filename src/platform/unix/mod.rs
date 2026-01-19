@@ -57,14 +57,14 @@ const RECVMSG_FLAGS: c_int = libc::MSG_CMSG_CLOEXEC;
 #[cfg(not(any(target_os = "linux", target_os = "illumos")))]
 const RECVMSG_FLAGS: c_int = 0;
 
-#[cfg(target_env = "gnu")]
+#[cfg(any(target_env = "gnu", target_os = "android"))]
 type IovLen = usize;
-#[cfg(target_env = "gnu")]
+#[cfg(any(target_env = "gnu", target_os = "android"))]
 type MsgControlLen = size_t;
 
-#[cfg(not(target_env = "gnu"))]
+#[cfg(not(any(target_env = "gnu", target_os = "android")))]
 type IovLen = i32;
-#[cfg(not(target_env = "gnu"))]
+#[cfg(not(any(target_env = "gnu", target_os = "android")))]
 type MsgControlLen = socklen_t;
 
 unsafe fn new_sockaddr_un(path: *const c_char) -> (sockaddr_un, usize) {

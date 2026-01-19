@@ -11,6 +11,7 @@
     not(feature = "force-inprocess"),
     any(
         target_os = "linux",
+        target_os = "android",
         target_os = "openbsd",
         target_os = "freebsd",
         target_os = "illumos",
@@ -21,6 +22,7 @@ mod unix;
     not(feature = "force-inprocess"),
     any(
         target_os = "linux",
+        target_os = "android",
         target_os = "openbsd",
         target_os = "freebsd",
         target_os = "illumos",
@@ -48,7 +50,6 @@ mod os {
 
 #[cfg(any(
     feature = "force-inprocess",
-    target_os = "android",
     target_os = "ios",
     target_os = "wasi",
     target_os = "unknown"
@@ -56,7 +57,6 @@ mod os {
 mod inprocess;
 #[cfg(any(
     feature = "force-inprocess",
-    target_os = "android",
     target_os = "ios",
     target_os = "wasi",
     target_os = "unknown"
