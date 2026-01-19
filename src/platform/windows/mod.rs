@@ -6,10 +6,10 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-
-use crate::ipc::{self, IpcMessage};
-use bincode;
+use crate::ipc::IpcMessage;
+use postcard;
 use serde_core;
+use thiserror::Error;
 
 use std::{
     cell::RefCell,
@@ -206,7 +206,7 @@ impl<'data> Message<'data> {
 
     fn oob_data(&self) -> Option<OutOfBandMessage> {
         if self.oob_len > 0 {
-            let mut oob = bincode::deserialize::<OutOfBandMessage>(self.oob_bytes())
+            let mut oob = postcard::from_bytes::<OutOfBandMessage>(self.oob_bytes())
                 .expect("Failed to deserialize OOB data");
             if let Err(e) = oob.recover_handles() {
                 win32_trace!("Failed to recover handles: {:?}", e);
@@ -1288,7 +1288,7 @@ impl OsIpcReceiver {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct OsIpcSender {
     handle: WinHandle,
 }
@@ -1346,7 +1346,7 @@ impl OsIpcSender {
 
     fn needs_fragmentation(data_len: usize, oob: &OutOfBandMessage) -> bool {
         let oob_size = if oob.needs_to_be_sent() {
-            bincode::serialized_size(oob).unwrap()
+            postcard::experimental::serialized_size(oob).unwrap()
         } else {
             0
         };
@@ -1451,7 +1451,7 @@ impl OsIpcSender {
         // If we need to send OOB data, serialize it
         let mut oob_data: Vec<u8> = vec![];
         if oob.needs_to_be_sent() {
-            oob_data = bincode::serialize(&oob).unwrap();
+            oob_data = postcard::to_allocvec(&oob).unwrap();
         }
 
         let in_band_data_len = if big_data_sender.is_none() {
@@ -1918,7 +1918,7 @@ pub enum OsIpcChannel {
     Receiver(OsIpcReceiver),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct OsOpaqueIpcChannel {
     handle: WinHandle,
 }
@@ -1948,10 +1948,13 @@ impl OsOpaqueIpcChannel {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum WinIpcError {
-    WinError(WinError),
+    #[error("Windows Error {0}.")]
+    WinError(#[from] WinError),
+    #[error("Channel Closed.")]
     ChannelClosed,
+    #[error("No Data.")]
     NoData,
 }
 
@@ -1961,33 +1964,23 @@ impl WinIpcError {
     }
 }
 
-impl From<WinIpcError> for bincode::Error {
-    fn from(error: WinIpcError) -> bincode::Error {
-        io::Error::from(error).into()
-    }
-}
-
-impl From<WinError> for WinIpcError {
-    fn from(e: WinError) -> Self {
-        Self::WinError(e)
-    }
-}
-
-impl From<WinIpcError> for ipc::IpcError {
+impl From<WinIpcError> for crate::IpcError {
     fn from(error: WinIpcError) -> Self {
         match error {
-            WinIpcError::ChannelClosed => ipc::IpcError::Disconnected,
-            e => ipc::IpcError::Io(io::Error::from(e)),
+            WinIpcError::ChannelClosed => crate::IpcError::Disconnected,
+            e => crate::IpcError::Io(io::Error::from(e)),
         }
     }
 }
 
-impl From<WinIpcError> for ipc::TryRecvError {
+impl From<WinIpcError> for crate::TryRecvError {
     fn from(error: WinIpcError) -> Self {
         match error {
-            WinIpcError::ChannelClosed => ipc::TryRecvError::IpcError(ipc::IpcError::Disconnected),
-            WinIpcError::NoData => ipc::TryRecvError::Empty,
-            e => ipc::TryRecvError::IpcError(ipc::IpcError::Io(io::Error::from(e))),
+            WinIpcError::ChannelClosed => {
+                crate::TryRecvError::IpcError(crate::IpcError::Disconnected)
+            },
+            WinIpcError::NoData => crate::TryRecvError::Empty,
+            e => crate::TryRecvError::IpcError(crate::IpcError::Io(io::Error::from(e))),
         }
     }
 }

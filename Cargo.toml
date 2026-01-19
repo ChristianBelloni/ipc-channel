@@ -6,6 +6,9 @@ authors = ["The Servo Project Developers"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/servo/ipc-channel"
 edition = "2021"
+# Keep this in sync with the msrv_build job in CI.
+# This version may be `<=`, but not higher than the MSRV in the main servo project.
+rust-version = "1.86.0"
 
 [[bench]]
 name = "platform"
@@ -35,17 +38,18 @@ win32-trace = []
 enable-slow-tests = []
 
 [dependencies]
-bincode = "1"
 crossbeam-channel = "0.5"
-fnv = "1.0.3"
 futures-channel = { version = "0.3.31", optional = true }
 futures-core = { version = "0.3.31", optional = true }
 libc = "0.2.162"
+postcard = {version = "1.1", features = ["use-std"]}
 serde_core = "1.0"
+thiserror = "2.0.12"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "openbsd", target_os = "freebsd", target_os = "illumos", target_os = "android"))'.dependencies]
 mio = { version = "1.0", default-features = false, features = ["os-ext"] }
+rustc-hash = "2.1"
 tempfile = "3.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]

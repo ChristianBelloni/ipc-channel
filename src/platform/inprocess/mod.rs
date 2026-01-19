@@ -7,20 +7,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::ipc::{self, IpcMessage};
-use bincode;
+use crate::ipc::IpcMessage;
 use crossbeam_channel::{self, Receiver, RecvTimeoutError, Select, Sender, TryRecvError};
 use std::cell::{Ref, RefCell};
 use std::cmp::PartialEq;
 use std::collections::hash_map::HashMap;
-use std::error::Error as StdError;
 use std::fmt::{self, Debug, Formatter};
 use std::io;
 use std::ops::{Deref, RangeFrom};
-use std::ptr::eq;
 use std::slice;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
+use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -65,13 +63,6 @@ pub fn channel() -> Result<(OsIpcSender, OsIpcReceiver), ChannelError> {
 #[derive(Debug)]
 pub struct OsIpcReceiver {
     receiver: RefCell<Option<crossbeam_channel::Receiver<ChannelMessage>>>,
-}
-
-impl PartialEq for OsIpcReceiver {
-    fn eq(&self, other: &OsIpcReceiver) -> bool {
-        self.receiver.borrow().as_ref().map(|rx| rx as *const _)
-            == other.receiver.borrow().as_ref().map(|rx| rx as *const _)
-    }
 }
 
 impl OsIpcReceiver {
@@ -124,13 +115,6 @@ impl OsIpcReceiver {
 #[derive(Clone, Debug)]
 pub struct OsIpcSender {
     sender: Sender<ChannelMessage>,
-}
-
-impl PartialEq for OsIpcSender {
-    fn eq(&self, other: &OsIpcSender) -> bool {
-        // FIXME: this implementation is wrong: https://github.com/servo/ipc-channel/issues/414
-        eq(&self.sender as *const _, &other.sender as *const _)
-    }
 }
 
 impl OsIpcSender {
@@ -275,13 +259,13 @@ impl OsIpcOneShotServer {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub enum OsIpcChannel {
     Sender(OsIpcSender),
     Receiver(OsIpcReceiver),
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub struct OsOpaqueIpcChannel {
     channel: RefCell<Option<OsIpcChannel>>,
 }
@@ -386,11 +370,15 @@ impl OsIpcSharedMemory {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum ChannelError {
+    #[error("Channel Closed.")]
     ChannelClosedError,
+    #[error("Broken Pipe.")]
     BrokenPipeError,
+    #[error("Channel Empty.")]
     ChannelEmpty,
+    #[error("Unknown Error.")]
     UnknownError,
 }
 
@@ -401,42 +389,23 @@ impl ChannelError {
     }
 }
 
-impl fmt::Display for ChannelError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ChannelError::ChannelClosedError => write!(fmt, "channel closed"),
-            ChannelError::BrokenPipeError => write!(fmt, "broken pipe"),
-            ChannelError::ChannelEmpty => write!(fmt, "channel empty"),
-            ChannelError::UnknownError => write!(fmt, "unknown error"),
-        }
-    }
-}
-
-impl StdError for ChannelError {}
-
-impl From<ChannelError> for bincode::Error {
-    fn from(crossbeam_error: ChannelError) -> Self {
-        io::Error::from(crossbeam_error).into()
-    }
-}
-
-impl From<ChannelError> for ipc::IpcError {
+impl From<ChannelError> for crate::IpcError {
     fn from(error: ChannelError) -> Self {
         match error {
-            ChannelError::ChannelClosedError => ipc::IpcError::Disconnected,
-            e => ipc::IpcError::Bincode(io::Error::from(e).into()),
+            ChannelError::ChannelClosedError => crate::IpcError::Disconnected,
+            e => crate::IpcError::Io(io::Error::from(e)),
         }
     }
 }
 
-impl From<ChannelError> for ipc::TryRecvError {
+impl From<ChannelError> for crate::TryRecvError {
     fn from(error: ChannelError) -> Self {
         match error {
             ChannelError::ChannelClosedError => {
-                ipc::TryRecvError::IpcError(ipc::IpcError::Disconnected)
+                crate::TryRecvError::IpcError(crate::IpcError::Disconnected)
             },
-            ChannelError::ChannelEmpty => ipc::TryRecvError::Empty,
-            e => ipc::TryRecvError::IpcError(ipc::IpcError::Bincode(io::Error::from(e).into())),
+            ChannelError::ChannelEmpty => crate::TryRecvError::Empty,
+            e => crate::TryRecvError::IpcError(crate::IpcError::Io(io::Error::from(e))),
         }
     }
 }

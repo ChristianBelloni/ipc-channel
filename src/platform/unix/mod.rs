@@ -7,9 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::ipc::{self, IpcMessage};
-use bincode;
-use fnv::FnvHasher;
+use crate::ipc::IpcMessage;
 use libc::{
     self, cmsghdr, linger, CMSG_DATA, CMSG_LEN, CMSG_SPACE, MAP_FAILED, MAP_SHARED, PROT_READ,
     PROT_WRITE, SOCK_SEQPACKET, SOL_SOCKET,
@@ -20,11 +18,11 @@ use libc::{sa_family_t, setsockopt, size_t, sockaddr, sockaddr_un, socketpair, s
 use libc::{EAGAIN, EWOULDBLOCK};
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
+use rustc_hash::FxHasher;
 use std::cell::Cell;
 use std::cmp;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::error::Error as StdError;
 use std::ffi::{c_uint, CString};
 use std::fmt::{self, Debug, Formatter};
 use std::hash::BuildHasherDefault;
@@ -39,6 +37,7 @@ use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::{Builder, TempDir};
+use thiserror::Error;
 
 const MAX_FDS_IN_CMSG: u32 = 64;
 
@@ -116,7 +115,7 @@ struct PollEntry {
     pub fd: RawFd,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub struct OsIpcReceiver {
     fd: Cell<c_int>,
 }
@@ -181,7 +180,7 @@ impl Drop for SharedFileDescriptor {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct OsIpcSender {
     fd: Arc<SharedFileDescriptor>,
 }
@@ -454,7 +453,7 @@ impl OsIpcSender {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub enum OsIpcChannel {
     Sender(OsIpcSender),
     Receiver(OsIpcReceiver),
@@ -472,7 +471,7 @@ impl OsIpcChannel {
 pub struct OsIpcReceiverSet {
     incrementor: RangeFrom<u64>,
     poll: Poll,
-    pollfds: HashMap<Token, PollEntry, BuildHasherDefault<FnvHasher>>,
+    pollfds: HashMap<Token, PollEntry, BuildHasherDefault<FxHasher>>,
     events: Events,
 }
 
@@ -487,11 +486,11 @@ impl Drop for OsIpcReceiverSet {
 
 impl OsIpcReceiverSet {
     pub fn new() -> Result<OsIpcReceiverSet, UnixError> {
-        let fnv = BuildHasherDefault::<FnvHasher>::default();
+        let fx = BuildHasherDefault::<FxHasher>::default();
         Ok(OsIpcReceiverSet {
             incrementor: 0..,
             poll: Poll::new()?,
-            pollfds: HashMap::with_hasher(fnv),
+            pollfds: HashMap::with_hasher(fx),
             events: Events::with_capacity(10),
         })
     }
@@ -588,7 +587,7 @@ impl OsIpcSelectionResult {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub struct OsOpaqueIpcChannel {
     fd: c_int,
 }
@@ -899,7 +898,7 @@ impl OsIpcSharedMemory {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum UnixError {
     Errno(c_int),
     ChannelClosed,
@@ -917,6 +916,15 @@ impl UnixError {
     }
 }
 
+impl From<UnixError> for crate::IpcError {
+    fn from(error: UnixError) -> Self {
+        match error {
+            UnixError::ChannelClosed => crate::IpcError::Disconnected,
+            e => crate::IpcError::Io(io::Error::from(e)),
+        }
+    }
+}
+
 impl fmt::Display for UnixError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -926,14 +934,6 @@ impl fmt::Display for UnixError {
             UnixError::ChannelClosed => write!(fmt, "All senders for this socket closed"),
             UnixError::IoError(e) => write!(fmt, "{e}"),
         }
-    }
-}
-
-impl StdError for UnixError {}
-
-impl From<UnixError> for bincode::Error {
-    fn from(unix_error: UnixError) -> Self {
-        io::Error::from(unix_error).into()
     }
 }
 
@@ -947,23 +947,16 @@ impl From<UnixError> for io::Error {
     }
 }
 
-impl From<UnixError> for ipc::IpcError {
+impl From<UnixError> for crate::TryRecvError {
     fn from(error: UnixError) -> Self {
         match error {
-            UnixError::ChannelClosed => ipc::IpcError::Disconnected,
-            e => ipc::IpcError::Io(io::Error::from(e)),
-        }
-    }
-}
-
-impl From<UnixError> for ipc::TryRecvError {
-    fn from(error: UnixError) -> Self {
-        match error {
-            UnixError::ChannelClosed => ipc::TryRecvError::IpcError(ipc::IpcError::Disconnected),
-            UnixError::Errno(code) if code == EAGAIN || code == EWOULDBLOCK => {
-                ipc::TryRecvError::Empty
+            UnixError::ChannelClosed => {
+                crate::TryRecvError::IpcError(crate::IpcError::Disconnected)
             },
-            e => ipc::TryRecvError::IpcError(ipc::IpcError::Io(io::Error::from(e))),
+            UnixError::Errno(code) if code == EAGAIN || code == EWOULDBLOCK => {
+                crate::TryRecvError::Empty
+            },
+            e => crate::TryRecvError::IpcError(crate::IpcError::Io(io::Error::from(e))),
         }
     }
 }
