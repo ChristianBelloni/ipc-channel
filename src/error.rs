@@ -19,6 +19,9 @@ pub enum IpcError {
     SerializationError(#[from] SerDeError),
     #[error("Error in IO: {0}.")]
     Io(#[from] io::Error),
+    /// Disconnected is returned when receiving from a channel if
+    /// all senders for the channel have been dropped and no messages
+    /// remain to be received.
     #[error("Ipc Disconnected.")]
     Disconnected,
 }
@@ -28,5 +31,14 @@ pub enum TryRecvError {
     #[error("IPC error {0}.")]
     IpcError(#[from] IpcError),
     #[error("Channel empty.")]
+    Empty,
+}
+
+/// TrySelectError is returned by non-blocking variants of IpcReceiverSet::select.
+#[derive(Debug, Error)]
+pub enum TrySelectError {
+    #[error("Error in IO: {0}.")]
+    IoError(#[from] io::Error),
+    #[error("No messages were received and no disconnections occurred.")]
     Empty,
 }
