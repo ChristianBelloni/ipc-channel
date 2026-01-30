@@ -1243,6 +1243,10 @@ fn is_socket(fd: c_int) -> bool {
         if libc::fstat(fd, st.as_mut_ptr()) != 0 {
             return false;
         }
-        (st.assume_init().st_mode & S_IFMT) == S_IFSOCK
+        // type inference trick to support armv7-linux-androideabi
+        #[allow(unused_assignments)]
+        let mut s_ifmt = st.assume_init().st_mode;
+        s_ifmt = S_IFMT as _;
+        (st.assume_init().st_mode & s_ifmt) == S_IFSOCK.into()
     }
 }
