@@ -30,14 +30,24 @@ use std::io;
 use std::mem;
 use std::ops::{Deref, RangeFrom};
 use std::os::fd::RawFd;
+use std::path::PathBuf;
 use std::ptr;
 use std::slice;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
+
+static BASE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+pub fn set_base_tmp_path(path: PathBuf) {
+    BASE_PATH
+        .set(Some(path))
+        .expect("set_base_tmp_path can only be called once")
+}
 
 const MAX_FDS_IN_CMSG: u32 = 64;
 
@@ -682,7 +692,11 @@ impl OsIpcOneShotServer {
     pub fn new() -> Result<(OsIpcOneShotServer, String), UnixError> {
         unsafe {
             let fd = libc::socket(libc::AF_UNIX, SOCK_SEQPACKET | SOCK_FLAGS, 0);
-            let temp_dir = Builder::new().tempdir()?;
+            let temp_dir = if let Some(base) = BASE_PATH.get_or_init(|| None) {
+                Builder::new().tempdir_in(base)?
+            } else {
+                Builder::new().tempdir()?
+            };
             let socket_path = temp_dir.path().join("socket");
             let path_string = socket_path.to_str().unwrap();
 

@@ -32,6 +32,18 @@ mod os {
     pub use super::unix::*;
 }
 
+#[cfg(all(
+    not(feature = "force-inprocess"),
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "openbsd",
+        target_os = "freebsd",
+        target_os = "illumos",
+    )
+))]
+pub use os::set_base_tmp_path;
+
 #[cfg(all(not(feature = "force-inprocess"), target_os = "macos"))]
 mod macos;
 #[cfg(all(not(feature = "force-inprocess"), target_os = "macos"))]
